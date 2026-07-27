@@ -1,0 +1,299 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      commit: ${{ steps.source.outputs.commit }}
+      stable: ${{ steps.version.outputs.stable }}
+    permissions:
+      contents: read
+    steps:
+      - name: Validate SemVer tag
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?$ ]]; then
+            echo "Release tag must use v-prefixed SemVer, for example v1.2.3 or v1.2.3-rc.1" >&2
+            exit 1
+          fi
+          version="${TAG#v}"
+          stable=true
+          expected_prerelease=false
+          if [[ "$version" == *-* ]]; then
+            stable=false
+            expected_prerelease=true
+          fi
+          if [[ "$RELEASE_PRERELEASE" != "$expected_prerelease" ]]; then
+            echo "GitHub Release prerelease flag must match the SemVer tag" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+
+      - name: Verify immutable release-tag ruleset
+        env:
+          API_URL: ${{ github.api_url }}
+        run: |
+          rulesets_json="$(
+            curl --fail --silent --show-error \
+              --proto '=https' --tlsv1.2 \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "${API_URL}/repos/${GITHUB_REPOSITORY}/rulesets?includes_parents=true"
+          )"
+          mapfile -t ruleset_ids < <(
+            jq -r '.[] | select(.name == "Protect release tags" and .target == "tag" and .enforcement == "active") | .id' \
+              <<< "$rulesets_json"
+          )
+          if (( ${#ruleset_ids[@]} != 1 )); then
+            echo "Exactly one active Protect release tags ruleset is required" >&2
+            exit 1
+          fi
+          ruleset_json="$(
+            curl --fail --silent --show-error \
+              --proto '=https' --tlsv1.2 \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "${API_URL}/repos/${GITHUB_REPOSITORY}/rulesets/${ruleset_ids[0]}"
+          )"
+          ruleset_ok="$(
+            jq -r '((.conditions.ref_name.include | index("refs/tags/v*")) != null) and ((.conditions.ref_name.exclude | length) == 0) and (([.rules[].type] | index("update")) != null) and (([.rules[].type] | index("deletion")) != null) and ((.bypass_actors | length) == 0)' \
+              <<< "$ruleset_json"
+          )"
+          if [[ "$ruleset_ok" != "true" ]]; then
+            echo "Release tag ruleset must cover every v* tag and block update/deletion without bypass actors" >&2
+            exit 1
+          fi
+
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release commit is on main
+        id: source
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          commit="$(git rev-parse --verify "${TAG}^{commit}")"
+          if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
+            echo "Release tag must point to a commit on main" >&2
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  jar:
+    name: Test and package JAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validate
+    permissions:
+      contents: read
+    steps:
+      - name: Check out validated release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle without shared release caches
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          cache-disabled: true
+
+      - name: Install LibreOffice for real conversion tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-calc fonts-noto-cjk
+
+      - name: Test and package
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          ./gradlew clean check integrationTest bootJar --no-daemon -PreleaseVersion="$VERSION"
+          mv build/libs/rendoc.jar "build/libs/rendoc-${VERSION}.jar"
+          cd build/libs
+          sha256sum "rendoc-${VERSION}.jar" > "rendoc-${VERSION}.jar.sha256"
+
+      - name: Preserve JAR for the publication job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rendoc-jar-${{ needs.validate.outputs.version }}
+          path: |
+            build/libs/rendoc-${{ needs.validate.outputs.version }}.jar
+            build/libs/rendoc-${{ needs.validate.outputs.version }}.jar.sha256
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish-jar:
+    name: Attest and attach JAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - validate
+      - jar
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Restore packaged JAR
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rendoc-jar-${{ needs.validate.outputs.version }}
+          path: artifacts
+
+      - name: Verify restored JAR checksum
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          cd artifacts
+          sha256sum --check --strict "rendoc-${VERSION}.jar.sha256"
+
+      - name: Verify release tag has not moved
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          EXPECTED_COMMIT: ${{ needs.validate.outputs.commit }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          direct=""
+          peeled=""
+          while read -r sha ref; do
+            case "$ref" in
+              "refs/tags/${TAG}") direct="$sha" ;;
+              "refs/tags/${TAG}^{}") peeled="$sha" ;;
+            esac
+          done < <(git ls-remote --exit-code --tags "https://github.com/${REPOSITORY}.git" "refs/tags/${TAG}*")
+          actual="${peeled:-$direct}"
+          if [[ -z "$actual" || "$actual" != "$EXPECTED_COMMIT" ]]; then
+            echo "Release tag changed after validation" >&2
+            exit 1
+          fi
+
+      - name: Attest JAR provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: artifacts/rendoc-${{ needs.validate.outputs.version }}.jar
+
+      - name: Upload JAR to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" \
+            "artifacts/rendoc-${VERSION}.jar" \
+            "artifacts/rendoc-${VERSION}.jar.sha256" \
+            --clobber
+
+  image:
+    name: Publish multi-architecture image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - validate
+      - publish-jar
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out validated release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ github.event.release.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }},enable=${{ needs.validate.outputs.stable == 'true' }}
+            type=semver,pattern={{major}},value=${{ github.event.release.tag_name }},enable=${{ needs.validate.outputs.stable == 'true' && !startsWith(needs.validate.outputs.version, '0.') }}
+          flavor: |
+            latest=auto
+
+      - name: Verify release tag has not moved
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          EXPECTED_COMMIT: ${{ needs.validate.outputs.commit }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          direct=""
+          peeled=""
+          while read -r sha ref; do
+            case "$ref" in
+              "refs/tags/${TAG}") direct="$sha" ;;
+              "refs/tags/${TAG}^{}") peeled="$sha" ;;
+            esac
+          done < <(git ls-remote --exit-code --tags "https://github.com/${REPOSITORY}.git" "refs/tags/${TAG}*")
+          actual="${peeled:-$direct}"
+          if [[ -z "$actual" || "$actual" != "$EXPECTED_COMMIT" ]]; then
+            echo "Release tag changed after validation" >&2
+            exit 1
+          fi
+
+      - name: Log in to GHCR
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.validate.outputs.version }}
+            VCS_REF=${{ needs.validate.outputs.commit }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
