@@ -29,7 +29,6 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'com.google.code.gson:gson'
     implementation "org.jodconverter:jodconverter-local-lo:${jodconverterVersion}"
-    implementation "org.jodconverter:jodconverter-spring-boot-starter:${jodconverterVersion}"
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 
     annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
