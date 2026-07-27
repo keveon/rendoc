@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1.18@sha256:dabfc0969b935b2080555ace70ee69a5261af8a8f1b4df97b9e7fbcf6722eddf
 
+ARG VERSION=dev
+
 FROM gradle:9.6.1-jdk21@sha256:9795f8c9009a7de6adea522b907c9aadc38fe7c313874112c2b696c8e70b0303 AS builder
+
+ARG VERSION
 
 WORKDIR /home/gradle/project
 COPY --chown=gradle:gradle gradle gradle
@@ -8,15 +12,16 @@ COPY --chown=gradle:gradle gradlew gradlew.bat build.gradle settings.gradle grad
 RUN --mount=type=cache,target=/home/gradle/.gradle \
     ./gradlew dependencies --no-daemon
 
+COPY --chown=gradle:gradle LICENSE THIRD_PARTY_NOTICES.md ./
 COPY --chown=gradle:gradle src src
 RUN --mount=type=cache,target=/home/gradle/.gradle \
-    ./gradlew clean bootJar --no-daemon && \
+    ./gradlew clean bootJar --no-daemon -PreleaseVersion="${VERSION}" && \
     cp build/libs/rendoc.jar /tmp/rendoc.jar
 
 FROM debian:13-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd AS runtime
 
 ARG VCS_REF="unknown"
-ARG VERSION="dev"
+ARG VERSION
 
 LABEL org.opencontainers.image.title="Rendoc" \
       org.opencontainers.image.description="Self-hosted Office document to PDF conversion API" \
@@ -58,7 +63,9 @@ RUN apt-get update && \
 
 COPY --from=builder --chown=root:root /tmp/rendoc.jar /app/rendoc.jar
 COPY --chown=root:root container/entrypoint.sh /usr/local/bin/rendoc-entrypoint
+COPY --chown=root:root LICENSE THIRD_PARTY_NOTICES.md /usr/share/doc/rendoc/
 RUN chmod 0444 /app/rendoc.jar && \
+    chmod 0444 /usr/share/doc/rendoc/LICENSE /usr/share/doc/rendoc/THIRD_PARTY_NOTICES.md && \
     chmod 0755 /usr/local/bin/rendoc-entrypoint && \
     fc-cache -f
 
