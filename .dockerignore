@@ -1,0 +1,11 @@
+.git
+.github
+.gradle
+.gradle-user-home
+build
+.tmp
+.env
+.idea
+.vscode
+*.iml
+*.log
