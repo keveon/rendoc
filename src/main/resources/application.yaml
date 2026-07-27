@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: rendoc
+  threads:
+    virtual:
+      enabled: true
+
+rendoc:
+  security:
+    api-token: ${RENDOC_API_TOKEN}
+  conversion:
+    max-input-bytes: ${RENDOC_MAX_INPUT_BYTES:20971520}
+    max-in-flight: ${RENDOC_MAX_IN_FLIGHT:2}
+    working-directory: ${RENDOC_WORK_DIR:/var/lib/rendoc/work}
+  libreoffice:
+    office-home: ${RENDOC_LIBREOFFICE_HOME:}
+    working-directory: ${RENDOC_LIBREOFFICE_WORK_DIR:/var/lib/rendoc/libreoffice}
+    port: ${RENDOC_LIBREOFFICE_PORT:2002}
+    max-tasks-per-process: ${RENDOC_MAX_TASKS_PER_PROCESS:20}
+    process-timeout: ${RENDOC_PROCESS_TIMEOUT:120s}
+    task-queue-timeout: ${RENDOC_TASK_QUEUE_TIMEOUT:30s}
+    task-execution-timeout: ${RENDOC_TASK_EXECUTION_TIMEOUT:120s}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+        add-additional-paths: true
+      show-details: never
+      group:
+        readiness:
+          include: readinessState,libreOffice
+  health:
+    readinessstate:
+      enabled: true
+    livenessstate:
+      enabled: true
+
+server:
+  shutdown: graceful
+  forward-headers-strategy: framework
+
+spring.lifecycle.timeout-per-shutdown-phase: 30s
