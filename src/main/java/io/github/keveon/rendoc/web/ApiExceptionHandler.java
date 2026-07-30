@@ -65,6 +65,11 @@ public class ApiExceptionHandler {
                     "invalid_document",
                     "Document cannot be converted",
                     "The document is corrupt, invalid, or cannot be rendered as PDF.");
+            case RENDER_FAILED -> new ProblemSpec(
+                    HttpStatus.UNPROCESSABLE_CONTENT,
+                    "render_failed",
+                    "Template rendering failed",
+                    "The template could not be rendered with the provided data.");
             case INTERNAL_ERROR -> new ProblemSpec(
                     HttpStatus.INTERNAL_SERVER_ERROR,
                     "internal_error",
