@@ -4,6 +4,13 @@ spring:
   threads:
     virtual:
       enabled: true
+  datasource:
+    url: jdbc:sqlite:${RENDOC_DB_PATH:/var/lib/rendoc/rendoc.db}
+    driver-class-name: org.sqlite.JDBC
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
 
 rendoc:
   security:
@@ -20,6 +27,13 @@ rendoc:
     process-timeout: ${RENDOC_PROCESS_TIMEOUT:120s}
     task-queue-timeout: ${RENDOC_TASK_QUEUE_TIMEOUT:30s}
     task-execution-timeout: ${RENDOC_TASK_EXECUTION_TIMEOUT:120s}
+  jobs:
+    enabled: ${RENDOC_JOBS_ENABLED:true}
+    max-batch-size: ${RENDOC_MAX_BATCH_SIZE:200}
+    poll-interval: ${RENDOC_JOB_POLL_INTERVAL:5s}
+    retention: ${RENDOC_JOB_RETENTION:24h}
+    cleanup-interval: ${RENDOC_JOB_CLEANUP_INTERVAL:1h}
+    output-dir: ${RENDOC_JOB_OUTPUT_DIR:/var/lib/rendoc/jobs}
 
 management:
   endpoints:
