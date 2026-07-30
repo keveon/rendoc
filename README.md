@@ -1,8 +1,8 @@
 # Rendoc
 
-> 自托管的 Office 文档转 PDF API，面向服务间调用与私有部署。
+> 自托管的 Office 文档处理与转 PDF API，面向服务间调用与私有部署。
 
-Rendoc 将应用服务、LibreOffice 运行时和容器发布流程维护在同一个仓库中，提供受限、可观测的 DOCX/XLSX 转 PDF 能力。它不抓取远程 URL，不接收服务器文件路径，也不在日志中记录文档内容或原始文件名。
+Rendoc 将应用服务、LibreOffice 运行时和容器发布流程维护在同一个仓库中，提供受限、可观测的 DOCX/XLSX 转 PDF 能力和基于模板的文档渲染能力。它不抓取远程 URL，不接收服务器文件路径，也不在日志中记录文档内容或原始文件名。
 
 ## 能力边界
 
@@ -41,6 +41,21 @@ curl --fail --show-error \
 ```
 
 转换 XLSX 时将 `source` 改为 `xlsx`，并使用对应的 SpreadsheetML `Content-Type`。
+
+### 模板渲染
+
+上传 DOCX 模板（含 `{{占位符}}`）和 JSON 数据，一次性完成渲染和转 PDF：
+
+```bash
+curl --fail --show-error \
+  -X POST 'http://127.0.0.1:8080/api/v1/render?target=pdf' \
+  -H "Authorization: Bearer ${REND...KEN}" \
+  -F 'template=@template.docx' \
+  -F 'data={"name":"张三","amount":"1,000.00"}' \
+  --output rendered.pdf
+```
+
+模板使用 [poi-tl](https://deepoove.com/poi-tl/) 语法，支持文本、表格、列表等占位符。
 
 ## 配置
 
@@ -93,7 +108,7 @@ API 错误使用 `application/problem+json`，并提供稳定的 `code` 字段�
 | `401` | `authentication_required` | Token 缺失或无效 |
 | `413` | `payload_too_large` | 输入超过上限 |
 | `415` | `unsupported_format` / `unsupported_media_type` | 格式或媒体类型不受支持 |
-| `422` | `invalid_document` | 文档为空、损坏或未生成有效 PDF |
+| `422` | `invalid_document` / `render_failed` | 文档为空、损坏或模板渲染失败 |
 | `429` | `capacity_exceeded` | 转换容量已满，可按 `Retry-After` 重试 |
 | `503` | `renderer_unavailable` | LibreOffice 暂不可用 |
 | `504` | `conversion_timeout` | 排队或转换超时 |
