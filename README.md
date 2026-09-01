@@ -57,6 +57,38 @@ curl --fail --show-error \
 
 模板使用 [poi-tl](https://deepoove.com/poi-tl/) 语法，支持文本、表格、列表等占位符。
 
+### 批量任务
+
+上传 DOCX 模板和 JSON 数据数组，异步渲染并转换为 PDF：
+
+```bash
+curl --fail --show-error \
+  -X POST 'http://127.0.0.1:8080/api/v1/jobs' \
+  -H "Authorization: Bearer ${REND...KEN}" \
+  -F 'template=@template.docx' \
+  -F 'data=[{"name":"张三","amount":"100"},{"name":"李四","amount":"200"}]' \
+  -F 'source=docx'
+# → 202 {"jobId":"...","itemCount":2,"status":"pending"}
+```
+
+查询进度：
+
+```bash
+curl 'http://127.0.0.1:8080/api/v1/jobs/{jobId}' \
+  -H "Authorization: Bearer ${REND...KEN}"
+# → {"status":"completed","total":2,"succeeded":2,"failed":0,...}
+```
+
+下载结果（ZIP 包含所有 PDF）：
+
+```bash
+curl 'http://127.0.0.1:8080/api/v1/jobs/{jobId}/results' \
+  -H "Authorization: Bearer ${REND...KEN}" \
+  --output results.zip
+```
+
+任务状态持久化在 SQLite 中，进程重启不丢失在途任务。完成后自动保留 24 小时（可配置），过期自动清理。
+
 ## 配置
 
 | 环境变量 | 默认值 | 说明 |
@@ -74,6 +106,12 @@ curl --fail --show-error \
 | `RENDOC_TASK_EXECUTION_TIMEOUT` | `120s` | 单次转换执行超时 |
 | `RENDOC_PORT` | `8080` | Compose 暴露到 `127.0.0.1` 的宿主机端口 |
 | `RENDOC_IMAGE` | `ghcr.io/keveon/rendoc:latest` | Compose 镜像引用；生产部署建议固定 GHCR 正式版本或摘要 |
+| `RENDOC_DB_PATH` | `/var/lib/rendoc/rendoc.db` | SQLite 数据库路径（批量任务状态） |
+| `RENDOC_JOBS_ENABLED` | `true` | 是否启用批量任务处理 |
+| `RENDOC_MAX_BATCH_SIZE` | `200` | 单次批量任务最大 item 数 |
+| `RENDOC_JOB_POLL_INTERVAL` | `5s` | Worker 轮询间隔 |
+| `RENDOC_JOB_RETENTION` | `24h` | 完成任务保留时间 |
+| `RENDOC_JOB_OUTPUT_DIR` | `/var/lib/rendoc/jobs` | 批量任务输出目录 |
 
 ## 字体
 
