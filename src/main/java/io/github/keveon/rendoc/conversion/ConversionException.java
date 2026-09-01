@@ -12,6 +12,7 @@ public class ConversionException extends RuntimeException {
         RENDERER_UNAVAILABLE,
         TIMEOUT,
         INVALID_DOCUMENT,
+        RENDER_FAILED,
         INTERNAL_ERROR
     }
 

@@ -21,6 +21,7 @@ repositories {
 
 ext {
     jodconverterVersion = '4.4.11'
+    poitlVersion = '1.12.2'
 }
 
 dependencies {
@@ -29,6 +30,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'com.google.code.gson:gson'
     implementation "org.jodconverter:jodconverter-local-lo:${jodconverterVersion}"
+    implementation "com.deepoove:poi-tl:${poitlVersion}"
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 
     annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
