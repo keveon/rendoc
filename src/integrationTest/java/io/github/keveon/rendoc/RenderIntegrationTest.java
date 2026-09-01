@@ -2,6 +2,8 @@ package io.github.keveon.rendoc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -39,12 +41,12 @@ class RenderIntegrationTest {
         String dataJson = "{\"name\":\"张三\",\"amount\":\"1,000.00\"}";
         String boundary = "rendoc-boundary-" + System.nanoTime();
 
-        String multipartBody = buildMultipartBody(boundary, template, dataJson);
+        byte[] multipartBody = buildMultipartBody(boundary, template, dataJson);
 
         var request = HttpRequest.newBuilder(renderUri())
                 .header("Authorization", "Bearer " + API_TOKEN)
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .POST(HttpRequest.BodyPublishers.ofString(multipartBody))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(multipartBody))
                 .build();
 
         HttpResponse<byte[]> response =
@@ -63,23 +65,23 @@ class RenderIntegrationTest {
         return URI.create("http://127.0.0.1:" + port + "/api/v1/render?target=pdf");
     }
 
-    private static String buildMultipartBody(String boundary, byte[] template, String dataJson) {
-        var sb = new StringBuilder();
+    private static byte[] buildMultipartBody(String boundary, byte[] template, String dataJson)
+            throws IOException {
+        var body = new ByteArrayOutputStream();
         // template part
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Disposition: form-data; name=\"template\"; filename=\"template.docx\"\r\n");
-        sb.append("Content-Type: application/octet-stream\r\n\r\n");
-        // binary template encoded as ISO-8859-1 to preserve bytes
-        sb.append(new String(template, StandardCharsets.ISO_8859_1));
-        sb.append("\r\n");
+        body.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+        body.write(("Content-Disposition: form-data; name=\"template\"; "
+                + "filename=\"template.docx\"\r\n").getBytes(StandardCharsets.UTF_8));
+        body.write("Content-Type: application/octet-stream\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        body.write(template);
+        body.write("\r\n".getBytes(StandardCharsets.UTF_8));
         // data part
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Disposition: form-data; name=\"data\"\r\n");
-        sb.append("Content-Type: application/json\r\n\r\n");
-        sb.append(dataJson);
-        sb.append("\r\n");
-        sb.append("--").append(boundary).append("--\r\n");
-        return sb.toString();
+        body.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+        body.write("Content-Disposition: form-data; name=\"data\"\r\n".getBytes(StandardCharsets.UTF_8));
+        body.write("Content-Type: application/json\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        body.write(dataJson.getBytes(StandardCharsets.UTF_8));
+        body.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        return body.toByteArray();
     }
 
     private static byte[] requireFixture(String path) throws Exception {
